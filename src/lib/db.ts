@@ -7,7 +7,7 @@ const DATA_DIR = process.env.VERCEL
 
 const DATA_FILE = path.join(DATA_DIR, "receipts.json");
 
-interface ReceiptRecord {
+export interface ReceiptRecord {
   id: string;
   image_base64: string;
   raw_llm: string;
@@ -55,11 +55,11 @@ export function getDb() {
   return { readAll, writeAll };
 }
 
-export function queryAll(): Record<string, any>[] {
+export function queryAll(): ReceiptRecord[] {
   return readAll().sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-export function queryOne(id: string): Record<string, any> | null {
+export function queryOne(id: string): ReceiptRecord | null {
   return readAll().find((r) => r.id === id) || null;
 }
 
@@ -78,15 +78,13 @@ export function updateRecord(id: string, updates: Partial<ReceiptRecord>) {
 }
 
 /** Normalize a DB record into camelCase API shape with deserialized line_items */
-export function normalizeReceipt(record: Record<string, any> | null | undefined): Record<string, any> | null | undefined {
+export function normalizeReceipt(record: ReceiptRecord | null | undefined) {
   if (!record) return record;
   return {
     id: record.id,
     merchant: record.merchant,
     date: record.date,
-    lineItems: typeof record.line_items === "string"
-      ? JSON.parse(record.line_items || "[]")
-      : record.line_items || [],
+    lineItems: JSON.parse(record.line_items || "[]"),
     subtotal: record.subtotal || 0,
     tax: record.tax || 0,
     discount: record.discount || 0,
@@ -102,7 +100,7 @@ export function normalizeReceipt(record: Record<string, any> | null | undefined)
 }
 
 /** Normalize a list of records for the summary list */
-export function normalizeReceiptSummary(record: Record<string, any> | null | undefined): Record<string, any> | null | undefined {
+export function normalizeReceiptSummary(record: ReceiptRecord | null | undefined) {
   if (!record) return record;
   return {
     id: record.id,

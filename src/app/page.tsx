@@ -13,16 +13,17 @@ import {
 interface ReceiptFormData {
   merchant: string;
   date: string;
-  lineItems: { id: string; name: string; amount: number }[];
-  subtotal: number;
-  tax: number;
-  discount: number;
-  tip: number;
-  total: number;
+  lineItems: { id: string; name: string; amount: number | string }[];
+  subtotal: number | string;
+  tax: number | string;
+  discount: number | string;
+  tip: number | string;
+  total: number | string;
 }
 
 interface ValidationFlags {
-  totalMatchesItems: boolean | null;
+  totalMatchesBreakdown: boolean | null;
+  itemsMatchSubtotal: boolean | null;
   merchantPresent: boolean;
   datePresent: boolean;
   hasItems: boolean;
@@ -30,17 +31,23 @@ interface ValidationFlags {
 }
 
 function validateReceipt(data: ReceiptFormData): ValidationFlags {
-  const expected = data.subtotal + data.tax + data.tip - data.discount;
-  const totalMatchesItems =
-    data.total > 0
-      ? Math.abs(data.total - expected) < 0.5
+  const expected = calculateComputedTotal(data);
+  const total = parseAmount(String(data.total));
+  const subtotal = parseAmount(String(data.subtotal));
+  const hasItems = data.lineItems.some((item) => item.name.trim().length > 0);
+  const totalMatchesBreakdown =
+    total > 0
+      ? Math.abs(total - expected) < 0.5
       : null;
   return {
-    totalMatchesItems,
+    totalMatchesBreakdown,
+    itemsMatchSubtotal: hasItems && subtotal > 0
+      ? Math.abs(calculateItemsSum(data.lineItems) - subtotal) < 0.5
+      : null,
     merchantPresent: data.merchant.trim().length > 0,
     datePresent: data.date.trim().length > 0,
-    hasItems: data.lineItems.length > 0,
-    totalPresent: data.total > 0,
+    hasItems,
+    totalPresent: total > 0,
   };
 }
 
@@ -64,8 +71,9 @@ function toISODate(value: string): string {
   return iso.toISOString().split("T")[0];
 }
 
-function formatCurrency(value: number): string {
-  return "₹" + (Number.isFinite(value) ? value : 0).toLocaleString("en-IN", {
+function formatCurrency(value: number | string): string {
+  const amount = Number(value);
+  return "₹" + (Number.isFinite(amount) ? amount : 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -81,9 +89,90 @@ function calculateItemsSum(items: ReceiptFormData["lineItems"]): number {
 }
 
 function calculateComputedTotal(data: ReceiptFormData): number {
-  const computed = data.subtotal + data.tax + data.tip - data.discount;
+  const computed = parseAmount(String(data.subtotal)) + parseAmount(String(data.tax))
+    + parseAmount(String(data.tip)) - parseAmount(String(data.discount));
   return computed < 0 ? 0 : computed;
 }
+
+const FieldShell = ({
+  children,
+  label,
+  htmlFor,
+  hint,
+  className = "",
+}: {
+  children: React.ReactNode;
+  label: string;
+  htmlFor: string;
+  hint?: React.ReactNode;
+  className?: string;
+}) => (
+  <div
+    className={`rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 transition-colors focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-200 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-amber-600 dark:focus-within:ring-amber-900 ${className}`}
+  >
+    <div className="mb-1 flex items-center justify-between">
+      <label
+        htmlFor={htmlFor}
+        className="text-xs font-medium text-stone-600 dark:text-stone-400"
+      >
+        {label}
+      </label>
+      {hint && <span className="text-xs text-stone-500">{hint}</span>}
+    </div>
+    {children}
+  </div>
+);
+
+const ValidationHint = ({
+  ok,
+  children,
+}: {
+  ok: boolean | null;
+  children: React.ReactNode;
+}) => {
+  if (ok === null) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm text-stone-500">
+        <span className="inline-flex h-2 w-2 rounded-full bg-stone-400" />
+        {children}
+      </span>
+    );
+  }
+  return ok ? (
+    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-4 w-4"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
+        <path
+          fillRule="evenodd"
+          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+          clipRule="evenodd"
+        />
+      </svg>
+      {children}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        className="h-4 w-4"
+        viewBox="0 0 20 20"
+        fill="currentColor"
+      >
+        <path
+          fillRule="evenodd"
+          d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+          clipRule="evenodd"
+        />
+      </svg>
+      {children}
+    </span>
+  );
+};
+
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -130,7 +219,7 @@ export default function Home() {
   }
 
   function handleFileSelect(file: File) {
-    if (!file.type.startsWith("image/")) {
+    if (!["image/jpeg", "image/png"].includes(file.type)) {
       setParseError("Please upload a JPG or PNG image.");
       return;
     }
@@ -141,9 +230,9 @@ export default function Home() {
     reader.onload = () => {
       const result = reader.result as string;
       setImagePreview(result);
-      compressImage(result, 1200, 85).then((compressed) => {
-        setImageBase64(compressed.split(",")[1]);
-      });
+      compressImage(result, 1200, 0.85)
+        .then((compressed) => setImageBase64(compressed.split(",")[1]))
+        .catch(() => setParseError("Could not process this image."));
     };
     reader.readAsDataURL(file);
   }
@@ -228,7 +317,7 @@ export default function Home() {
   }
 
   function updateAmountField(field: "subtotal" | "tax" | "discount" | "tip" | "total", value: string) {
-    setReceipt((prev) => ({ ...prev, [field]: parseAmount(value) }));
+    setReceipt((prev) => ({ ...prev, [field]: value }));
     resetSaveStatus();
   }
 
@@ -277,12 +366,12 @@ export default function Home() {
       await updateReceipt(receiptId, {
         merchant: receipt.merchant,
         date: receipt.date,
-        lineItems: receipt.lineItems,
-        subtotal: receipt.subtotal,
-        tax: receipt.tax,
-        discount: receipt.discount,
-        tip: receipt.tip,
-        total: receipt.total,
+        lineItems: receipt.lineItems.map(({ name, amount }) => ({ name, amount: parseAmount(String(amount)) })),
+        subtotal: parseAmount(String(receipt.subtotal)),
+        tax: parseAmount(String(receipt.tax)),
+        discount: parseAmount(String(receipt.discount)),
+        tip: parseAmount(String(receipt.tip)),
+        total: parseAmount(String(receipt.total)),
       });
       setSaveStatus("success");
       await loadSavedReceipts();
@@ -308,85 +397,6 @@ export default function Home() {
       setIsParsing(false);
     }
   }
-
-  const FieldShell = ({
-    children,
-    label,
-    htmlFor,
-    hint,
-    className = "",
-  }: {
-    children: React.ReactNode;
-    label: string;
-    htmlFor: string;
-    hint?: React.ReactNode;
-    className?: string;
-  }) => (
-    <div
-      className={`rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 transition-colors focus-within:border-amber-400 focus-within:ring-1 focus-within:ring-amber-200 dark:border-stone-700 dark:bg-stone-900 dark:focus-within:border-amber-600 dark:focus-within:ring-amber-900 ${className}`}
-    >
-      <div className="mb-1 flex items-center justify-between">
-        <label
-          htmlFor={htmlFor}
-          className="text-xs font-medium text-stone-600 dark:text-stone-400"
-        >
-          {label}
-        </label>
-        {hint && <span className="text-xs text-stone-500">{hint}</span>}
-      </div>
-      {children}
-    </div>
-  );
-
-  const ValidationHint = ({
-    ok,
-    children,
-  }: {
-    ok: boolean | null;
-    children: React.ReactNode;
-  }) => {
-    if (ok === null) {
-      return (
-        <span className="inline-flex items-center gap-1.5 text-sm text-stone-500">
-          <span className="inline-flex h-2 w-2 rounded-full bg-stone-400" />
-          {children}
-        </span>
-      );
-    }
-    return ok ? (
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-4 w-4"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-        >
-          <path
-            fillRule="evenodd"
-            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-            clipRule="evenodd"
-          />
-        </svg>
-        {children}
-      </span>
-    ) : (
-      <span className="inline-flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-4 w-4"
-          viewBox="0 0 20 20"
-          fill="currentColor"
-        >
-          <path
-            fillRule="evenodd"
-            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-            clipRule="evenodd"
-          />
-        </svg>
-        {children}
-      </span>
-    );
-  };
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
@@ -465,6 +475,8 @@ export default function Home() {
                 className="block w-full cursor-zoom-in"
                 aria-label="Open receipt image preview"
               >
+                {/* The preview is a local data URL; do not send receipt images to the image optimizer. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={imagePreview}
                   alt="Receipt preview"
@@ -569,6 +581,8 @@ export default function Home() {
               />
             </svg>
           </button>
+          {/* The zoomed preview is the same local data URL. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imagePreview}
             alt="Receipt zoomed preview"
@@ -579,7 +593,7 @@ export default function Home() {
       )}
 
       {/* Parsed Receipt View */}
-      {(receipt.merchant || receipt.date || receipt.lineItems[0]?.name || receipt.total > 0) && (
+      {(receipt.merchant || receipt.date || receipt.lineItems[0]?.name || Number(receipt.total) > 0) && (
         <section className="mb-8">
           <h2 className="mb-4 text-lg font-medium text-stone-900 dark:text-stone-100">
             2. Review & correct
@@ -779,7 +793,7 @@ export default function Home() {
                           value={item.amount}
                           onChange={(e) =>
                             updateLineItem(idx, {
-                              amount: parseAmount(e.target.value),
+                              amount: e.target.value,
                             })
                           }
                           placeholder="0.00"
@@ -834,11 +848,18 @@ export default function Home() {
                   <ValidationHint ok={validation.totalPresent}>
                     {validation.totalPresent ? "Total present" : "Total missing"}
                   </ValidationHint>
-                  <ValidationHint ok={validation.totalMatchesItems}>
-                    {validation.totalMatchesItems === true
-                      ? "Total matches items"
-                      : validation.totalMatchesItems === false
-                      ? "Total does not match items"
+                  <ValidationHint ok={validation.itemsMatchSubtotal}>
+                    {validation.itemsMatchSubtotal === true
+                      ? "Line items match subtotal"
+                      : validation.itemsMatchSubtotal === false
+                      ? "Line items do not match subtotal"
+                      : "Enter line items and subtotal to validate"}
+                  </ValidationHint>
+                  <ValidationHint ok={validation.totalMatchesBreakdown}>
+                    {validation.totalMatchesBreakdown === true
+                      ? "Total matches subtotal, tax, tip and discount"
+                      : validation.totalMatchesBreakdown === false
+                      ? "Total does not match subtotal, tax, tip and discount"
                       : "Enter total to validate"}
                   </ValidationHint>
                 </div>

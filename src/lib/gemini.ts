@@ -50,7 +50,7 @@ const RESPONSE_SCHEMA = {
 
 const SYSTEM_PROMPT = `Extract receipt data as structured JSON. Line items are purchasable products or services only — do not include subtotal, tax, discount, tip, or total in line items. Set discount and tip to 0 if not present.`;
 
-export async function analyzeReceipt(imageBase64: string): Promise<ReceiptAnalysis> {
+export async function analyzeReceipt(imageBase64: string, mimeType: "image/jpeg" | "image/png" = "image/jpeg"): Promise<ReceiptAnalysis> {
   if (!genAI) {
     throw new Error("GEMINI_API_KEY is not set");
   }
@@ -58,7 +58,7 @@ export async function analyzeReceipt(imageBase64: string): Promise<ReceiptAnalys
   const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, "");
 
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
     systemInstruction: SYSTEM_PROMPT,
   });
 
@@ -69,7 +69,7 @@ export async function analyzeReceipt(imageBase64: string): Promise<ReceiptAnalys
         parts: [
           {
             inlineData: {
-              mimeType: "image/jpeg",
+              mimeType,
               data: cleanBase64,
             },
           },
@@ -96,8 +96,10 @@ export async function analyzeReceipt(imageBase64: string): Promise<ReceiptAnalys
       date: typeof parsed.date === "string" ? parsed.date : "",
       lineItems: Array.isArray(parsed.lineItems)
         ? parsed.lineItems
-            .filter((item: any) => item && typeof item.name === "string")
-            .map((item: any) => ({
+            .filter((item: unknown): item is { name: string; amount?: unknown } =>
+              !!item && typeof item === "object" && "name" in item &&
+              typeof item.name === "string")
+            .map((item: { name: string; amount?: unknown }) => ({
               name: item.name,
               amount: typeof item.amount === "number" ? item.amount : 0,
             }))
@@ -108,7 +110,7 @@ export async function analyzeReceipt(imageBase64: string): Promise<ReceiptAnalys
       tip: typeof parsed.tip === "number" ? parsed.tip : 0,
       total: typeof parsed.total === "number" ? parsed.total : 0,
     };
-  } catch (e) {
+  } catch {
     console.error("Gemini returned invalid JSON despite responseSchema:", text.slice(0, 200));
     throw new Error("Failed to parse Gemini response");
   }

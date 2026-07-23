@@ -25,19 +25,42 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
     initDb();
+    if (!queryOne(id)) {
+      return NextResponse.json({ error: "Receipt not found" }, { status: 404 });
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    }
+    const amounts = ["subtotal", "tax", "discount", "tip", "total"] as const;
+    const valid = body && typeof body === "object" &&
+      typeof body.merchant === "string" && typeof body.date === "string" &&
+      Array.isArray(body.lineItems) &&
+      body.lineItems.every((item: unknown) => item !== null && typeof item === "object" &&
+        typeof (item as { name?: unknown }).name === "string" &&
+        typeof (item as { amount?: unknown }).amount === "number" &&
+        Number.isFinite((item as { amount: number }).amount)) &&
+      amounts.every((field) => {
+        const value = body[field];
+        return typeof value === "number" && Number.isFinite(value);
+      });
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid receipt fields" }, { status: 400 });
+    }
     const now = new Date().toISOString();
 
     updateRecord(id, {
-      merchant: body.merchant,
-      date: body.date,
-      line_items: JSON.stringify(body.lineItems || []),
-      subtotal: body.subtotal || 0,
-      tax: body.tax || 0,
-      discount: body.discount || 0,
-      tip: body.tip || 0,
-      total: body.total || 0,
+      merchant: body.merchant as string,
+      date: body.date as string,
+      line_items: JSON.stringify(body.lineItems),
+      subtotal: body.subtotal as number,
+      tax: body.tax as number,
+      discount: body.discount as number,
+      tip: body.tip as number,
+      total: body.total as number,
       status: "corrected",
       updated_at: now,
     });

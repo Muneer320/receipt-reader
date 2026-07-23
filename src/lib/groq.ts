@@ -1,6 +1,6 @@
 import { ReceiptAnalysis } from "@/lib/gemini";
 
-export async function analyzeWithGroq(imageBase64: string): Promise<ReceiptAnalysis> {
+export async function analyzeWithGroq(imageBase64: string, mimeType: "image/jpeg" | "image/png" = "image/jpeg"): Promise<ReceiptAnalysis> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error("GROQ_API_KEY is not set");
 
@@ -13,7 +13,7 @@ export async function analyzeWithGroq(imageBase64: string): Promise<ReceiptAnaly
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "qwen/qwen3.6-27b",
+      model: process.env.GROQ_MODEL || "qwen/qwen3.8-27b",
       messages: [
         {
           role: "user",
@@ -25,7 +25,7 @@ export async function analyzeWithGroq(imageBase64: string): Promise<ReceiptAnaly
             {
               type: "image_url",
               image_url: {
-                url: `data:image/jpeg;base64,${clean}`,
+                url: `data:${mimeType};base64,${clean}`,
                 detail: "low",
               },
             },
@@ -74,22 +74,26 @@ export async function analyzeWithGroq(imageBase64: string): Promise<ReceiptAnaly
   throw new Error("Groq returned invalid JSON: " + text.slice(0, 200));
 }
 
-function coerceShape(parsed: any): ReceiptAnalysis {
-  if (typeof parsed.merchant !== "string") parsed.merchant = "";
-  if (typeof parsed.date !== "string") parsed.date = "";
-  if (!Array.isArray(parsed.lineItems)) parsed.lineItems = [];
-  if (typeof parsed.subtotal !== "number") parsed.subtotal = 0;
-  if (typeof parsed.tax !== "number") parsed.tax = 0;
-  if (typeof parsed.discount !== "number") parsed.discount = 0;
-  if (typeof parsed.tip !== "number") parsed.tip = 0;
-  if (typeof parsed.total !== "number") parsed.total = 0;
-
-  parsed.lineItems = parsed.lineItems
-    .filter((item: any) => item && typeof item.name === "string")
-    .map((item: any) => ({
-      name: item.name,
-      amount: typeof item.amount === "number" ? item.amount : 0,
-    }));
-
-  return parsed;
+function coerceShape(input: unknown): ReceiptAnalysis {
+  const parsed: Record<string, unknown> = input !== null && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown> : {};
+  const amount = (key: string) => typeof parsed[key] === "number" && Number.isFinite(parsed[key])
+    ? parsed[key] as number : 0;
+  const lineItems = Array.isArray(parsed.lineItems) ? parsed.lineItems : [];
+  return {
+    merchant: typeof parsed.merchant === "string" ? parsed.merchant : "",
+    date: typeof parsed.date === "string" ? parsed.date : "",
+    lineItems: lineItems
+      .filter((item: unknown): item is { name: string; amount?: unknown } =>
+        !!item && typeof item === "object" && "name" in item && typeof item.name === "string")
+      .map((item: { name: string; amount?: unknown }) => ({
+        name: item.name,
+        amount: typeof item.amount === "number" && Number.isFinite(item.amount) ? item.amount : 0,
+      })),
+    subtotal: amount("subtotal"),
+    tax: amount("tax"),
+    discount: amount("discount"),
+    tip: amount("tip"),
+    total: amount("total"),
+  };
 }
