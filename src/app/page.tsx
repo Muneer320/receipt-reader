@@ -258,7 +258,7 @@ export default function Home() {
       const next = prev.lineItems.filter((_, i) => i !== index);
       return {
         ...prev,
-        lineItems: next.length ? next : [{ name: "", amount: 0 }],
+        lineItems: next.length ? next : [{ id: "item-0", name: "", amount: 0 }],
       };
     });
     resetSaveStatus();
